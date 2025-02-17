@@ -18,9 +18,18 @@ resource "random_password" "rw_user_password" {
   special = true
 }
 
+resource "random_password" "admin_user_password" {
+  length  = 16
+  special = true
+}
+
 locals {
   # Construct the master username as <environment>_<id>_master
   master_username = "${var.environment}_${var.id}_master"
+}
+
+locals {
+  admin_username = "${var.environment}_admin"
 }
 
 locals {
@@ -59,9 +68,6 @@ resource "null_resource" "create_oracle_users" {
 
   provisioner "local-exec" {
     command = join(" ", [
-      "sudo apt update &&",
-      "sudo apt install python3-pip &&",
-      "pip3 install cx_Oracle &&",
       "python3",
       "${path.module}/scripts/create_users.py",
       aws_db_instance.oracle_db.endpoint,
@@ -69,6 +75,8 @@ resource "null_resource" "create_oracle_users" {
       local.master_username,
       random_password.oracle_master_password.result,
       var.db_name,
+      local.admin_username,
+      random_password.admin_user_password.result,
       local.read_username,
       random_password.read_user_password.result,
       local.rw_username,
@@ -78,57 +86,34 @@ resource "null_resource" "create_oracle_users" {
   }
 }
 
-resource "aws_secretsmanager_secret" "avk_master_secret" {
-  name        = "${var.environment}_${var.id}_master_credentials"
-  description = "Master credentials for the Oracle RDS instance"
+
+resource "aws_secretsmanager_secret" "AVK_testdb_credentials" {
+  name        = "${var.environment}_${var.id}_oracle_credentials"
+  description = "Combined credentials for Oracle RDS instance: master, admin, read, and read-write"
   tags = {
     Environment = var.environment
-    Role        = "ADMIN"
+    Role        = "CREDENTIALS"
   }
 }
 
-resource "aws_secretsmanager_secret_version" "avk_master_secret_version" {
-  secret_id = aws_secretsmanager_secret.avk_master_secret.id
+resource "aws_secretsmanager_secret_version" "AVK_testdb_credentials_version" {
+  secret_id = aws_secretsmanager_secret.combined_credentials.id
   secret_string = jsonencode({
-    instance_name = "${var.environment}_${var.id}_oracle_rds",                     
-    endpoint      = aws_db_instance.oracle_db.address, 
-    database_name = "${var.environment}_${var.id}_oracle_rds",                    
-    port          = aws_db_instance.oracle_db.port,   
-    username      = local.master_username,    
-    password      = random_password.oracle_master_password.result
-  })
-}
-
-resource "aws_secretsmanager_secret" "read_user_secret" {
-  name        = "${var.environment}_read_user_credentials"
-  description = "Credentials for the Read-Only user on the Oracle RDS instance"
-  tags = {
-    Environment = var.environment
-    Role        = "READ_USER"
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "read_user_secret_version" {
-  secret_id = aws_secretsmanager_secret.read_user_secret.id
-  secret_string = jsonencode({
-    username = local.read_username,
-    password = random_password.read_user_password.result
-  })
-}
-
-resource "aws_secretsmanager_secret" "rw_user_secret" {
-  name        = "${var.environment}_rw_user_credentials"
-  description = "Credentials for the Read-Write user on the Oracle RDS instance"
-  tags = {
-    Environment = var.environment
-    Role        = "RW_USER"
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "rw_user_secret_version" {
-  secret_id = aws_secretsmanager_secret.rw_user_secret.id
-  secret_string = jsonencode({
-    username = local.rw_username,
-    password = random_password.rw_user_password.result
+    master = {
+      username = local.master_username,
+      password = random_password.oracle_master_password.result
+    },
+    admin = {
+      username = local.admin_username,
+      password = random_password.admin_user_password.result
+    },
+    read = {
+      username = local.read_username,
+      password = random_password.read_user_password.result
+    },
+    rw = {
+      username = local.rw_username,
+      password = random_password.rw_user_password.result
+    }
   })
 }
